@@ -20,6 +20,7 @@ from django.utils import six
 from django.utils.safestring import mark_safe
 from django.utils.encoding import force_text
 
+from import_export import fields
 from . import widgets
 from .fields import Field
 from .instance_loaders import ModelInstanceLoader
@@ -31,9 +32,7 @@ try:
 except ImportError:
     from .django_compat import atomic, savepoint, savepoint_rollback, savepoint_commit  # noqa
 
-
 from django.db.models.fields.related import ForeignObjectRel
-
 
 logger = logging.getLogger(__name__)
 # Set default logging handler to avoid "No handler found" warnings.
@@ -123,7 +122,6 @@ class ResourceOptions(object):
 
 
 class DeclarativeMetaclass(type):
-
     def __new__(cls, name, bases, attrs):
         declared_fields = []
         meta = ResourceOptions()
@@ -575,7 +573,8 @@ class Resource(six.with_metaclass(DeclarativeMetaclass)):
         using_transactions = (use_transactions or dry_run) and supports_transactions
 
         with atomic_if_using_transaction(using_transactions):
-            return self.import_data_inner(dataset, dry_run, raise_errors, using_transactions, collect_failed_rows, **kwargs)
+            return self.import_data_inner(dataset, dry_run, raise_errors, using_transactions, collect_failed_rows,
+                                          **kwargs)
 
     def import_data_inner(self, dataset, dry_run, raise_errors, using_transactions, collect_failed_rows, **kwargs):
         result = self.get_result_class()()
@@ -713,7 +712,6 @@ class Resource(six.with_metaclass(DeclarativeMetaclass)):
 
 
 class ModelDeclarativeMetaclass(DeclarativeMetaclass):
-
     def __new__(cls, name, bases, attrs):
         new_class = super(ModelDeclarativeMetaclass,
                           cls).__new__(cls, name, bases, attrs)
@@ -738,7 +736,7 @@ class ModelDeclarativeMetaclass(DeclarativeMetaclass):
 
                 field = new_class.field_from_django_field(f.name, f,
                                                           readonly=False)
-                field_list.append((f.name, field, ))
+                field_list.append((f.name, field,))
 
             new_class.fields.update(OrderedDict(field_list))
 
@@ -754,7 +752,7 @@ class ModelDeclarativeMetaclass(DeclarativeMetaclass):
                     model = opts.model
                     attrs = field_name.split('__')
                     for i, attr in enumerate(attrs):
-                        verbose_path = ".".join([opts.model.__name__] + attrs[0:i+1])
+                        verbose_path = ".".join([opts.model.__name__] + attrs[0:i + 1])
 
                         try:
                             f = model._meta.get_field(attr)
@@ -933,3 +931,22 @@ def modelresource_factory(model, resource_class=ModelResource):
 
     metaclass = ModelDeclarativeMetaclass
     return metaclass(class_name, (resource_class,), class_attrs)
+
+
+def export_resource_factory(model_class):
+    class ModelExportResource(ModelResource):
+        def __init__(self):
+            for field in model_class._meta.get_fields():
+                # filter non-instance model fields with check below
+                if hasattr(field, 'attname'):
+                    self.fields[field.name] = fields.Field(
+                        column_name=field.verbose_name,
+                        attribute=field.name
+                    )
+            super(ModelExportResource).__init__()
+
+        class Meta:
+            model = model_class
+            fields = [field.name for field in model_class._meta.get_fields()]
+
+    return ModelExportResource

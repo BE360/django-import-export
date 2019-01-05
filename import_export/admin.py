@@ -2,19 +2,21 @@ from __future__ import with_statement
 
 from datetime import datetime
 
-import importlib
 import django
-from django.contrib import admin
-from django.contrib.auth import get_permission_codename
-from django.utils import six
-from django.utils.translation import ugettext_lazy as _
 from django.conf.urls import url
-from django.template.response import TemplateResponse
+from django.contrib import admin
 from django.contrib import messages
 from django.contrib.admin.models import LogEntry, ADDITION, CHANGE, DELETION
+from django.contrib.auth import get_permission_codename
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponseRedirect, HttpResponse
+from django.template.response import TemplateResponse
+from django.utils import six
+from django.utils.translation import ugettext_lazy as _
+
+from import_export.resources import export_resource_factory
+
 try:
     from django.urls import reverse
 except ImportError:  # Django<2.0
@@ -39,11 +41,9 @@ from .results import RowResult
 from .tmp_storages import TempFolderStorage
 from .signals import post_export, post_import
 
-
 SKIP_ADMIN_LOG = getattr(settings, 'IMPORT_EXPORT_SKIP_ADMIN_LOG', False)
 TMP_STORAGE_CLASS = getattr(settings, 'IMPORT_EXPORT_TMP_STORAGE_CLASS',
                             TempFolderStorage)
-
 
 if isinstance(TMP_STORAGE_CLASS, six.string_types):
     TMP_STORAGE_CLASS = import_string(TMP_STORAGE_CLASS)
@@ -208,8 +208,8 @@ class ImportMixin(ImportExportMixinBase):
 
         success_message = _('Import finished, with {} new and ' \
                             '{} updated {}.').format(result.totals[RowResult.IMPORT_TYPE_NEW],
-                                                      result.totals[RowResult.IMPORT_TYPE_UPDATE],
-                                                      opts.verbose_name_plural)
+                                                     result.totals[RowResult.IMPORT_TYPE_UPDATE],
+                                                     opts.verbose_name_plural)
 
         messages.success(request, success_message)
 
@@ -273,7 +273,8 @@ class ImportMixin(ImportExportMixinBase):
             except UnicodeDecodeError as e:
                 return HttpResponse(_(u"<h1>Imported file has a wrong encoding: %s</h1>" % e))
             except Exception as e:
-                return HttpResponse(_(u"<h1>%s encountered while trying to read file: %s</h1>" % (type(e).__name__, import_file.name)))
+                return HttpResponse(
+                    _(u"<h1>%s encountered while trying to read file: %s</h1>" % (type(e).__name__, import_file.name)))
             result = resource.import_data(dataset, dry_run=True,
                                           raise_errors=False,
                                           file_name=import_file.name,
@@ -503,29 +504,33 @@ class ExportActionMixin(ExportMixin):
         self.action_form = export_action_form_factory(choices)
         super(ExportActionMixin, self).__init__(*args, **kwargs)
 
-    def export_admin_action(self, request, queryset):
+    def export_admin_action(modeladmin, request, queryset):
         """
         Exports the selected rows using file_format.
         """
-        export_format = request.POST.get('file_format')
+        # hard coded export format to "excel" using value of "1"
+        export_format = 1
 
         if not export_format:
-            messages.warning(request, _('You must select an export format.'))
+            messages.warning(request, 'You must select an export format.')
         else:
-            formats = self.get_export_formats()
+            formats = modeladmin.get_export_formats()
             file_format = formats[int(export_format)]()
 
-            export_data = self.get_export_data(file_format, queryset, request=request)
+            export_data = modeladmin.get_export_data(file_format, queryset, request=request)
             content_type = file_format.get_content_type()
             response = HttpResponse(export_data, content_type=content_type)
             response['Content-Disposition'] = 'attachment; filename=%s' % (
-                self.get_export_filename(file_format),
+                modeladmin.get_export_filename(file_format),
             )
             return response
-    export_admin_action.short_description = _(
-        'Export selected %(verbose_name_plural)s')
+
+    export_admin_action.short_description = 'تولید خروجی اکسل'
 
     actions = [export_admin_action]
+
+    def get_resource_class(self):
+        return export_resource_factory(self.model)
 
     class Media:
         js = ['import_export/action_formats.js']
